@@ -1,0 +1,205 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>Go/No-Go 研究系統 v4.0 - 分頁匯出版</title>
+    
+    <script type="module">
+        import { initializeApp } from "https://www.gstatic.com/firebasejs/10.7.1/firebase-app.js";
+        import { getFirestore, collection, addDoc, getDocs, query, orderBy, serverTimestamp } from "https://www.gstatic.com/firebasejs/10.7.1/firebase-firestore.js";
+
+        const firebaseConfig = {
+          apiKey: "AIzaSyBkiXpkscSB3IhhE6_pqdo1mKH3bFIn_94",
+          authDomain: "go-and-no-go.firebaseapp.com",
+          projectId: "go-and-no-go",
+          storageBucket: "go-and-no-go.firebasestorage.app",
+          messagingSenderId: "702318630196",
+          appId: "1:702318630196:web:f16cb603822964ce9fc161",
+          measurementId: "G-ZCQ4NTRLTZ"
+        };
+
+        const app = initializeApp(firebaseConfig);
+        const db = getFirestore(app);
+        
+        window.db = db;
+        window.addDoc = addDoc;
+        window.getDocs = getDocs;
+        window.collection = collection;
+        window.query = query;
+        window.orderBy = orderBy;
+        window.serverTimestamp = serverTimestamp;
+    </script>
+
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
+
+    <style>
+        :root { --primary: #3498db; --success: #2ecc71; --danger: #e74c3c; --bg: #f8f9fa; }
+        body { margin: 0; font-family: -apple-system, sans-serif; background: var(--bg); display: flex; flex-direction: column; align-items: center; min-height: 100vh; touch-action: manipulation; }
+        .container { width: 90%; max-width: 450px; background: white; padding: 25px; border-radius: 20px; box-shadow: 0 10px 25px rgba(0,0,0,0.1); text-align: center; margin-top: 40px; }
+        .hidden { display: none !important; }
+        input { width: 100%; padding: 12px; margin: 8px 0; border: 1px solid #ddd; border-radius: 8px; box-sizing: border-box; font-size: 16px; }
+        label { display: block; text-align: left; font-size: 14px; font-weight: bold; margin-top: 10px; color: #34495e; }
+        .vas-label { display: flex; justify-content: space-between; font-size: 12px; color: #7f8c8d; }
+        #test-canvas { width: 100%; height: 280px; background: #fff; border: 2px dashed #ddd; display: flex; justify-content: center; align-items: center; font-size: 100px; font-weight: bold; cursor: pointer; position: relative; border-radius: 15px; margin: 15px 0; }
+        #feedback { position: absolute; top: 15px; font-size: 24px; font-weight: bold; }
+        .btn { width: 100%; padding: 15px; background: var(--primary); color: white; border: none; border-radius: 10px; font-size: 18px; cursor: pointer; margin-top: 10px; font-weight: bold; }
+        .admin-section { width: 90%; max-width: 450px; margin-top: 50px; padding: 20px; border-top: 1px solid #ddd; text-align: center; }
+    </style>
+</head>
+<body>
+
+<div id="step-login" class="container">
+    <h2 style="margin-top:0; color:var(--primary)">受試者登入</h2>
+    <label>基本資訊</label>
+    <input type="text" id="user-name" placeholder="請輸入姓名">
+    <div style="display: flex; gap: 10px;">
+        <div style="flex: 2;"><label>實驗日期</label><input type="date" id="test-date"></div>
+        <div style="flex: 1;"><label>測試次數</label><input type="number" id="test-session" placeholder="1" min="1"></div>
+    </div>
+    <label>環境與生理狀況</label>
+    <input type="number" id="sleep-hours" step="0.5" placeholder="昨晚睡了幾小時？">
+    <input type="number" id="env-noise" placeholder="環境背景音 (dB 分貝)">
+    <label>自覺疲勞程度 (VAS)</label>
+    <div class="vas-label"><span>完全不累</span><span>極度疲勞</span></div>
+    <input type="range" id="vas-score" min="0" max="100" value="50" style="padding:0; margin:5px 0;">
+    <button class="btn" onclick="startToTest()">進入測試</button>
+</div>
+
+<div id="step-test" class="container hidden">
+    <div style="display:flex; justify-content: space-between; margin-bottom:10px;">
+        <span id="prog">進度: 0 / 25</span>
+        <span id="clock" style="color:var(--primary); font-weight:bold;">0.0s</span>
+    </div>
+    <div id="test-canvas" onclick="handleTap()">
+        <div id="feedback"></div>
+        <div id="stimulus" style="color:#bdc3c7; font-size:35px;">點擊開始</div>
+    </div>
+    <p style="color:#7f8c8d; font-size:14px;">P (點擊) / R (不要動)</p>
+</div>
+
+<div id="step-result" class="container hidden">
+    <h2 style="color:var(--success)">測試完成</h2>
+    <div id="report-text" style="text-align:left; line-height:1.6; margin: 15px 0; background:#f0f7ff; padding:15px; border-radius:10px; font-size:15px;"></div>
+    <p id="cloud-status">☁️ 正在同步至雲端...</p>
+    <button class="btn" onclick="location.reload()">重新開始</button>
+</div>
+
+<div class="admin-section">
+    <button id="export-btn" class="btn" style="background:#27ae60; font-size:14px;" onclick="exportData()">💾 匯出自動分頁 Excel (.xlsx)</button>
+</div>
+
+<script>
+    document.getElementById('test-date').valueAsDate = new Date();
+    let userData = {}, trials = [], isRunning = false, currentStim = null, stimStart = 0, count = 0;
+    let waitT, outT, sessionStart;
+
+    function startToTest() {
+        const name = document.getElementById('user-name').value;
+        const date = document.getElementById('test-date').value;
+        const session = document.getElementById('test-session').value;
+        const sleep = document.getElementById('sleep-hours').value;
+        const noise = document.getElementById('env-noise').value;
+        if(!name || !date || !session || !sleep || !noise) return alert("請完整填寫所有欄位！");
+        userData = { name, testDate: date, testSession: parseInt(session), sleep: parseFloat(sleep), noise_db: parseFloat(noise), vas: parseInt(document.getElementById('vas-score').value), loginTime: new Date().toLocaleString() };
+        document.getElementById('step-login').classList.add('hidden');
+        document.getElementById('step-test').classList.remove('hidden');
+    }
+
+    function handleTap() {
+        if(!isRunning && count === 0) { isRunning = true; sessionStart = performance.now(); userData.testStartTime = new Date().toLocaleTimeString('zh-TW', { hour12: false }); updateClock(); nextRound(); return; }
+        if(!isRunning || !currentStim) return;
+        clearTimeout(outT);
+        const rt = Math.round(performance.now() - stimStart);
+        if(currentStim === 'P') { saveTrial('P', rt, 'Correct Hit'); showFeedback("Good!", "#2ecc71"); }
+        else { saveTrial('R', rt, 'False Alarm'); showFeedback("Oops!", "#e74c3c"); }
+        nextRound();
+    }
+
+    function nextRound() {
+        currentStim = null; document.getElementById('stimulus').innerText = "";
+        if(count >= 25) { finishTest(); return; }
+        count++;
+        document.getElementById('prog').innerText = `進度: ${count} / 25`;
+        waitT = setTimeout(() => {
+            currentStim = Math.random() > 0.3 ? 'P' : 'R';
+            const el = document.getElementById('stimulus');
+            el.innerText = currentStim;
+            el.style.fontSize = "120px";
+            el.style.color = currentStim === 'P' ? "#2c3e50" : "#e74c3c";
+            stimStart = performance.now();
+            outT = setTimeout(() => {
+                if(currentStim === 'P') { saveTrial('P', 0, 'Miss'); showFeedback("Miss", "#95a5a6"); }
+                else { saveTrial('R', 0, 'Correct Inhibition'); showFeedback("Safe", "#3498db"); }
+                nextRound();
+            }, 1200);
+        }, Math.random() * 1500 + 1500);
+    }
+
+    function saveTrial(s, rt, res) { trials.push({ trial: count, stimulus: s, rt, status: res }); }
+    function showFeedback(txt, col) { const f = document.getElementById('feedback'); f.innerText = txt; f.style.color = col; f.style.opacity = 1; setTimeout(() => f.style.opacity = 0, 400); }
+    function updateClock() { if(isRunning) { document.getElementById('clock').innerText = ((performance.now() - sessionStart)/1000).toFixed(1) + "s"; requestAnimationFrame(updateClock); } }
+
+    async function finishTest() {
+        isRunning = false;
+        document.getElementById('step-test').classList.add('hidden');
+        document.getElementById('step-result').classList.remove('hidden');
+        const p_trials = trials.filter(t => t.stimulus === 'P');
+        const r_trials = trials.filter(t => t.stimulus === 'R');
+        const p_hits = p_trials.filter(t => t.status === 'Correct Hit');
+        const r_fails = r_trials.filter(t => t.status === 'False Alarm');
+        const hit_rate = Math.round((p_hits.length / p_trials.length) * 100);
+        const fa_rate = Math.round((r_fails.length / r_trials.length) * 100);
+        const avgRT = p_hits.length ? (p_hits.reduce((a,b)=>a+b.rt, 0)/p_hits.length).toFixed(1) : 0;
+
+        document.getElementById('report-text').innerHTML = `受試者: ${userData.name}<br>日期: ${userData.testDate}<br>第 ${userData.testSession} 次測試<hr>⚡ 平均反應時: ${avgRT} ms<br>🎯 P 正確率: ${hit_rate}%<br>🚫 R 誤觸率: ${fa_rate}%`;
+
+        try {
+            await window.addDoc(window.collection(window.db, "results"), { ...userData, avgRT: parseFloat(avgRT), p_hit_rate: hit_rate, r_false_alarm_rate: fa_rate, details: trials, timestamp: window.serverTimestamp() });
+            document.getElementById('cloud-status').innerHTML = "✅ 數據已成功同步";
+            document.getElementById('cloud-status').style.color = "#2ecc71";
+        } catch (e) { document.getElementById('cloud-status').innerHTML = "❌ 同步失敗"; }
+    }
+
+    // --- 關鍵修改：按人名分頁匯出 ---
+    window.exportData = async function() {
+        const btn = document.getElementById('export-btn');
+        btn.innerText = "正在分類數據...";
+        try {
+            const q = window.query(window.collection(window.db, "results"), window.orderBy("name", "asc"), window.orderBy("timestamp", "desc"));
+            const querySnapshot = await window.getDocs(q);
+            if (querySnapshot.empty) return alert("資料庫無數據！");
+
+            const wb = XLSX.utils.book_new();
+            let peopleData = {};
+
+            querySnapshot.forEach((doc) => {
+                const d = doc.data();
+                const name = d.name || "未命名";
+                if (!peopleData[name]) peopleData[name] = [];
+                peopleData[name].push({
+                    "實驗日期": d.testDate,
+                    "次數": d.testSession,
+                    "開始時間": d.testStartTime,
+                    "睡眠時數": d.sleep,
+                    "分貝(dB)": d.noise_db,
+                    "VAS疲勞": d.vas,
+                    "反應時(ms)": d.avgRT,
+                    "P正確率(%)": d.p_hit_rate,
+                    "R誤觸率(%)": d.r_false_alarm_rate
+                });
+            });
+
+            Object.keys(peopleData).forEach(name => {
+                const ws = XLSX.utils.json_to_sheet(peopleData[name]);
+                XLSX.utils.book_append_sheet(wb, ws, name.substring(0, 31));
+            });
+
+            XLSX.writeFile(wb, `全體實驗報表_${new Date().toLocaleDateString()}.xlsx`);
+            btn.innerText = "匯出成功！";
+        } catch (e) { alert("匯出錯誤"); }
+        finally { setTimeout(() => btn.innerText = "💾 匯出自動分頁 Excel (.xlsx)", 2000); }
+    }
+</script>
+</body>
+</html>
