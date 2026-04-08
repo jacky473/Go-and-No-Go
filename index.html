@@ -3,11 +3,11 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <title>Go/No-Go 研究系統 v4.0 - 分頁匯出版</title>
+    <title>Go/No-Go 研究系統 v4.1</title>
     
     <script type="module">
         import { initializeApp } from "https://www.gstatic.com/firebasejs/10.7.1/firebase-app.js";
-        import { getFirestore, collection, addDoc, getDocs, query, orderBy, serverTimestamp } from "https://www.gstatic.com/firebasejs/10.7.1/firebase-firestore.js";
+        import { getFirestore, collection, addDoc, getDocs, serverTimestamp } from "https://www.gstatic.com/firebasejs/10.7.1/firebase-firestore.js";
 
         const firebaseConfig = {
           apiKey: "AIzaSyBkiXpkscSB3IhhE6_pqdo1mKH3bFIn_94",
@@ -26,8 +26,6 @@
         window.addDoc = addDoc;
         window.getDocs = getDocs;
         window.collection = collection;
-        window.query = query;
-        window.orderBy = orderBy;
         window.serverTimestamp = serverTimestamp;
     </script>
 
@@ -50,12 +48,12 @@
 <body>
 
 <div id="step-login" class="container">
-    <h2 style="margin-top:0; color:var(--primary)">受試者登入 (測試版)</h2>
+    <h2 style="margin-top:0; color:var(--primary)">受試者登入</h2>
     <label>基本資訊</label>
     <input type="text" id="user-name" placeholder="請輸入姓名">
     <div style="display: flex; gap: 10px;">
         <div style="flex: 2;"><label>實驗日期</label><input type="date" id="test-date"></div>
-        <div style="flex: 1;"><label>測試次數</label><input type="number" id="test-session" placeholder="1" min="1"></div>
+        <div style="flex: 1;"><label>測試次數</label><input type="number" id="test-session" value="1" min="1"></div>
     </div>
     <label>環境與生理狀況</label>
     <input type="number" id="sleep-hours" step="0.5" placeholder="昨晚睡了幾小時？">
@@ -75,7 +73,7 @@
         <div id="feedback"></div>
         <div id="stimulus" style="color:#bdc3c7; font-size:35px;">點擊開始</div>
     </div>
-    <p style="color:#7f8c8d; font-size:14px;">看到 <b>P</b> 請點擊 / 看到 <b>R</b> 不要動</p>
+    <p style="color:#7f8c8d; font-size:14px;">P (點擊) / R (不要動)</p>
 </div>
 
 <div id="step-result" class="container hidden">
@@ -86,7 +84,6 @@
 </div>
 
 <div class="admin-section">
-    <p style="color:#95a5a6; font-size:12px;">管理員區域</p>
     <button id="export-btn" class="btn" style="background:#27ae60; font-size:14px;" onclick="exportData()">💾 匯出自動分頁 Excel (.xlsx)</button>
 </div>
 
@@ -159,17 +156,23 @@
             await window.addDoc(window.collection(window.db, "results"), { ...userData, avgRT: parseFloat(avgRT), p_hit_rate: hit_rate, r_false_alarm_rate: fa_rate, details: trials, timestamp: window.serverTimestamp() });
             document.getElementById('cloud-status').innerHTML = "✅ 數據已成功同步";
             document.getElementById('cloud-status').style.color = "#2ecc71";
-        } catch (e) { document.getElementById('cloud-status').innerHTML = "❌ 同步失敗"; }
+        } catch (e) { 
+            console.error(e);
+            document.getElementById('cloud-status').innerHTML = "❌ 同步失敗：" + e.message; 
+        }
     }
 
-    // --- 匯出功能：按姓名自動分 Sheet ---
+    // --- 診斷匯出功能 ---
     window.exportData = async function() {
         const btn = document.getElementById('export-btn');
-        btn.innerText = "讀取中...";
+        btn.innerText = "診斷中...";
         try {
-            const q = window.query(window.collection(window.db, "results"), window.orderBy("name", "asc"), window.orderBy("timestamp", "desc"));
-            const querySnapshot = await window.getDocs(q);
-            if (querySnapshot.empty) return alert("資料庫無數據！");
+            if (!window.db) throw new Error("資料庫未連接。");
+
+            // 抓取資料 (移除排序，避免權限/索引問題)
+            const querySnapshot = await window.getDocs(window.collection(window.db, "results"));
+            
+            if (querySnapshot.empty) throw new Error("資料庫內查無資料，請先測完一輪！");
 
             const wb = XLSX.utils.book_new();
             let peopleData = {};
@@ -179,19 +182,19 @@
                 const name = d.name || "未命名";
                 if (!peopleData[name]) peopleData[name] = [];
                 peopleData[name].push({
-                    "實驗日期": d.testDate || "無日期",
-                    "次數": d.testSession || 0,
-                    "遊戲開始時間": d.testStartTime || "",
+                    "實驗日期": d.testDate || "",
+                    "測試次數": d.testSession || 0,
+                    "開始時間": d.testStartTime || "",
                     "睡眠時數": d.sleep || 0,
-                    "分貝(dB)": d.noise_db || 0,
+                    "環境音(dB)": d.noise_db || 0,
                     "VAS疲勞": d.vas || 0,
-                    "反應時(ms)": d.avgRT || 0,
+                    "平均反應時(ms)": d.avgRT || 0,
                     "P正確率(%)": d.p_hit_rate || 0,
                     "R誤觸率(%)": d.r_false_alarm_rate || 0
                 });
             });
 
-            // 根據人名產生 Sheet
+            // 產生分頁
             Object.keys(peopleData).forEach(name => {
                 const ws = XLSX.utils.json_to_sheet(peopleData[name]);
                 XLSX.utils.book_append_sheet(wb, ws, name.substring(0, 31));
@@ -199,8 +202,13 @@
 
             XLSX.writeFile(wb, `實驗報表_${new Date().toLocaleDateString()}.xlsx`);
             btn.innerText = "匯出成功！";
-        } catch (e) { alert("匯出出錯"); }
-        finally { setTimeout(() => btn.innerText = "💾 匯出自動分頁 Excel (.xlsx)", 2000); }
+            
+        } catch (e) {
+            console.error(e);
+            alert("匯出失敗！診斷原因：\n" + e.message);
+        } finally {
+            setTimeout(() => btn.innerText = "💾 匯出自動分頁 Excel (.xlsx)", 2000);
+        }
     }
 </script>
 </body>
