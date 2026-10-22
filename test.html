@@ -62,12 +62,11 @@
         h2 { margin-top: 0; margin-bottom: 10px; color: #2c3e50; font-size: 18px; }
         .progress-text { font-size: 16px; font-weight: bold; color: var(--primary); margin-bottom: 10px; }
         
-        /* 放大後的圖片區域 */
+        /* 恢復原本大小的圖片區域，並加上手指游標提示可點擊 */
         .img-box {
             width: 100%;
-            height: 45vh; /* 動態抓取螢幕高度的 45% */
-            min-height: 350px; /* 確保最小高度 */
-            background: #000; /* 改用黑色底，讓指甲對比更清楚 */
+            height: 280px; 
+            background: #000;
             border: 2px dashed #cbd5e1;
             border-radius: 15px;
             display: flex;
@@ -75,11 +74,54 @@
             align-items: center;
             overflow: hidden;
             margin-bottom: 15px;
+            cursor: pointer;
+            position: relative;
         }
         .img-box img {
             width: 100%;
             height: 100%;
             object-fit: contain;
+        }
+        .img-box::after {
+            content: "🔍 點擊放大";
+            position: absolute;
+            bottom: 8px;
+            right: 8px;
+            background: rgba(0,0,0,0.6);
+            color: white;
+            padding: 4px 8px;
+            border-radius: 6px;
+            font-size: 12px;
+            pointer-events: none;
+        }
+
+        /* 圖片放大模態框 (Modal) */
+        #imageModal {
+            display: none; 
+            position: fixed;
+            z-index: 1000;
+            left: 0;
+            top: 0;
+            width: 100%;
+            height: 100%;
+            background-color: rgba(0, 0, 0, 0.9);
+            justify-content: center;
+            align-items: center;
+            flex-direction: column;
+        }
+        #modalImg {
+            max-width: 95vw;
+            max-height: 85vh;
+            object-fit: contain;
+            border-radius: 10px;
+        }
+        .close-modal-text {
+            color: white;
+            margin-top: 15px;
+            font-size: 16px;
+            background: rgba(255,255,255,0.2);
+            padding: 8px 16px;
+            border-radius: 20px;
         }
 
         /* 觸控按鈕網格 */
@@ -114,54 +156,26 @@
             margin-bottom: 15px;
             border: 1px solid #ffe0b2;
         }
-        .input-row {
-            display: flex;
-            gap: 8px;
-            margin-top: 10px;
-        }
+        .input-row { display: flex; gap: 8px; margin-top: 10px; }
         input[type="text"] { 
-            flex: 1;
-            padding: 12px; 
-            border: 2px solid var(--warning); 
-            border-radius: 8px; 
-            font-size: 16px; 
-            outline: none;
+            flex: 1; padding: 12px; border: 2px solid var(--warning); 
+            border-radius: 8px; font-size: 16px; outline: none;
         }
         .submit-btn {
-            background: var(--success);
-            color: white;
-            border: none;
-            padding: 0 15px;
-            border-radius: 8px;
-            font-size: 16px;
-            font-weight: bold;
-            cursor: pointer;
+            background: var(--success); color: white; border: none;
+            padding: 0 15px; border-radius: 8px; font-size: 16px; font-weight: bold; cursor: pointer;
         }
         .submit-btn:active { background: #27ae60; transform: scale(0.96); }
-        
         .cancel-btn {
-            background: #94a3b8;
-            color: white;
-            border: none;
-            padding: 0 15px;
-            border-radius: 8px;
-            font-size: 16px;
-            font-weight: bold;
-            cursor: pointer;
+            background: #94a3b8; color: white; border: none;
+            padding: 0 15px; border-radius: 8px; font-size: 16px; font-weight: bold; cursor: pointer;
         }
         .cancel-btn:active { background: #64748b; transform: scale(0.96); }
 
         /* 上一步按鈕 */
         .undo-btn {
-            background: #e2e8f0;
-            color: #475569;
-            border: none;
-            padding: 12px;
-            width: 100%;
-            border-radius: 10px;
-            cursor: pointer;
-            font-size: 15px;
-            font-weight: bold;
+            background: #e2e8f0; color: #475569; border: none; padding: 12px;
+            width: 100%; border-radius: 10px; cursor: pointer; font-size: 15px; font-weight: bold;
         }
         .undo-btn:active { background: #cbd5e1; }
     </style>
@@ -172,7 +186,8 @@
     <h2>實拍指甲標記表</h2>
     <div id="progress" class="progress-text">載入中...</div>
 
-    <div class="img-box">
+    <!-- 點擊圖片即可放大 -->
+    <div class="img-box" onclick="openModal()">
         <img id="nailImage" src="" alt="指甲影像">
     </div>
 
@@ -186,7 +201,7 @@
         <button class="label-btn other-btn" onclick="showOtherInput()">其他 (自訂)</button>
     </div>
 
-    <!-- 動態顯示的其他疾病輸入框 (包含取消與確認按鈕) -->
+    <!-- 動態顯示的其他疾病輸入框 -->
     <div id="otherInputBox">
         <p style="margin: 0; color: #d35400; font-weight: bold; font-size: 14px; text-align: left;">請輸入疾病名稱：</p>
         <div class="input-row">
@@ -199,6 +214,12 @@
     <button class="undo-btn" onclick="undoLast()">↩️ 上一步 (重新標記)</button>
 </div>
 
+<!-- 圖片全螢幕放大模態框 (點擊任意處關閉) -->
+<div id="imageModal" onclick="closeModal()">
+    <img id="modalImg" src="">
+    <div class="close-modal-text">點擊任意處關閉</div>
+</div>
+
 <script>
 // 1. 自動產生圖片陣列 (1.png 到 70.png)
 const imageList = [];
@@ -206,7 +227,6 @@ for (let i = 1; i <= 70; i++) {
     imageList.push(`${i}.png`);
 }
 
-// 改用 let 宣告以便從本機存檔中恢復進度
 let currentIndex = 0;
 let results = [];
 
@@ -216,6 +236,8 @@ const progressElement = document.getElementById('progress');
 const buttonGrid = document.getElementById('buttonGrid');
 const otherInputBox = document.getElementById('otherInputBox');
 const otherTextInput = document.getElementById('otherText');
+const imageModal = document.getElementById('imageModal');
+const modalImg = document.getElementById('modalImg');
 
 // 3. 系統初始化 (檢查是否有未完成的進度)
 function initSystem() {
@@ -244,8 +266,7 @@ function updateDisplay() {
         otherInputBox.style.display = 'none';
         otherTextInput.value = '';
     } else {
-        // 70 張全部完成
-        nailImageElement.style.display = 'none';
+        document.querySelector('.img-box').style.display = 'none';
         buttonGrid.style.display = 'none';
         otherInputBox.style.display = 'none';
         document.querySelector('.undo-btn').style.display = 'none';
@@ -254,7 +275,7 @@ function updateDisplay() {
     }
 }
 
-// 5. 將目前進度存入瀏覽器快取 (防呆防閃退)
+// 5. 將目前進度存入瀏覽器快取
 function saveProgressLocally() {
     localStorage.setItem('nail_label_index', currentIndex);
     localStorage.setItem('nail_label_results', JSON.stringify(results));
@@ -265,25 +286,33 @@ function clearLocalProgress() {
     localStorage.removeItem('nail_label_results');
 }
 
-// 6. 處理一般按鈕點擊
+// 6. 處理圖片放大與關閉
+function openModal() {
+    modalImg.src = imageList[currentIndex];
+    imageModal.style.display = 'flex';
+}
+function closeModal() {
+    imageModal.style.display = 'none';
+}
+
+// 7. 處理一般按鈕點擊
 function handleLabel(labelValue) {
     saveAndNext(labelValue);
 }
 
-// 7. 處理「其他」按鈕點擊 (顯示) 與取消 (隱藏)
+// 8. 處理「其他」按鈕點擊與取消
 function showOtherInput() {
     buttonGrid.style.display = 'none';
     otherInputBox.style.display = 'block';
     otherTextInput.focus();
 }
-
 function cancelOther() {
     otherInputBox.style.display = 'none';
     otherTextInput.value = '';
-    buttonGrid.style.display = 'grid'; // 恢復顯示主按鈕
+    buttonGrid.style.display = 'grid';
 }
 
-// 8. 處理「其他」輸入框的確認送出
+// 9. 處理「其他」輸入框的確認送出
 function submitOther() {
     const val = otherTextInput.value.trim();
     if (val !== "") {
@@ -293,7 +322,7 @@ function submitOther() {
     }
 }
 
-// 9. 記錄結果並切換下一張
+// 10. 記錄結果並切換下一張
 function saveAndNext(labelValue, note = "") {
     results.push({
         image: imageList[currentIndex],
@@ -301,11 +330,11 @@ function saveAndNext(labelValue, note = "") {
         note: note
     });
     currentIndex++;
-    saveProgressLocally(); // 每次點擊都自動備份進度
+    saveProgressLocally(); 
     updateDisplay();
 }
 
-// 10. 上一步功能 (退回上一張並更新備份)
+// 11. 上一步功能
 function undoLast() {
     if (currentIndex > 0) {
         currentIndex--;
@@ -315,7 +344,7 @@ function undoLast() {
     }
 }
 
-// 11. 將結果寫入 Firebase
+// 12. 將結果寫入 Firebase
 async function saveToFirebase() {
     try {
         await addDoc(collection(db, "results"), {
@@ -323,7 +352,7 @@ async function saveToFirebase() {
             total_count: results.length,
             details: results
         });
-        clearLocalProgress(); // 上傳成功後清空本地暫存
+        clearLocalProgress(); 
         progressElement.innerHTML = "<span style='color: var(--success);'>🎉 感謝協助！所有標記結果已成功儲存至雲端資料庫！</span>";
     } catch (error) {
         console.error("Firebase 儲存失敗:", error);
