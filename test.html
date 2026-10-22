@@ -5,7 +5,6 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
     <title>居家指甲健康監測系統 – 實拍指甲標記表</title>
     
-    <!-- 載入 Firebase v10 模組 -->
     <script type="module">
         import { initializeApp } from "https://www.gstatic.com/firebasejs/10.7.1/firebase-app.js";
         import { getFirestore, collection, addDoc, serverTimestamp } from "https://www.gstatic.com/firebasejs/10.7.1/firebase-firestore.js";
@@ -46,28 +45,29 @@
             flex-direction: column; 
             align-items: center; 
             min-height: 100vh; 
-            padding: 15px 10px;
+            padding: 10px;
             box-sizing: border-box;
-            touch-action: manipulation; /* 防止手機點擊時雙擊放大 */
+            touch-action: manipulation;
         }
         .container { 
             width: 100%; 
             max-width: 500px; 
             background: var(--card); 
-            padding: 20px; 
+            padding: 15px; 
             border-radius: 20px; 
             box-shadow: 0 10px 25px rgba(0,0,0,0.08); 
             text-align: center; 
             box-sizing: border-box;
         }
         h2 { margin-top: 0; margin-bottom: 10px; color: #2c3e50; font-size: 18px; }
-        .progress-text { font-size: 16px; font-weight: bold; color: var(--primary); margin-bottom: 15px; }
+        .progress-text { font-size: 16px; font-weight: bold; color: var(--primary); margin-bottom: 10px; }
         
-        /* 圖片區域 */
+        /* 放大後的圖片區域 */
         .img-box {
             width: 100%;
-            height: 280px;
-            background: #f0f3f6;
+            height: 45vh; /* 動態抓取螢幕高度的 45% */
+            min-height: 350px; /* 確保最小高度 */
+            background: #000; /* 改用黑色底，讓指甲對比更清楚 */
             border: 2px dashed #cbd5e1;
             border-radius: 15px;
             display: flex;
@@ -77,10 +77,9 @@
             margin-bottom: 15px;
         }
         .img-box img {
-            max-width: 100%;
-            max-height: 100%;
+            width: 100%;
+            height: 100%;
             object-fit: contain;
-            border-radius: 8px;
         }
 
         /* 觸控按鈕網格 */
@@ -132,13 +131,25 @@
             background: var(--success);
             color: white;
             border: none;
-            padding: 0 20px;
+            padding: 0 15px;
             border-radius: 8px;
             font-size: 16px;
             font-weight: bold;
             cursor: pointer;
         }
         .submit-btn:active { background: #27ae60; transform: scale(0.96); }
+        
+        .cancel-btn {
+            background: #94a3b8;
+            color: white;
+            border: none;
+            padding: 0 15px;
+            border-radius: 8px;
+            font-size: 16px;
+            font-weight: bold;
+            cursor: pointer;
+        }
+        .cancel-btn:active { background: #64748b; transform: scale(0.96); }
 
         /* 上一步按鈕 */
         .undo-btn {
@@ -175,11 +186,12 @@
         <button class="label-btn other-btn" onclick="showOtherInput()">其他 (自訂)</button>
     </div>
 
-    <!-- 動態顯示的其他疾病輸入框 (包含專屬送出按鈕) -->
+    <!-- 動態顯示的其他疾病輸入框 (包含取消與確認按鈕) -->
     <div id="otherInputBox">
         <p style="margin: 0; color: #d35400; font-weight: bold; font-size: 14px; text-align: left;">請輸入疾病名稱：</p>
         <div class="input-row">
             <input type="text" id="otherText" placeholder="例如：黑甲症...">
+            <button class="cancel-btn" onclick="cancelOther()">取消</button>
             <button class="submit-btn" onclick="submitOther()">確認</button>
         </div>
     </div>
@@ -194,8 +206,9 @@ for (let i = 1; i <= 70; i++) {
     imageList.push(`${i}.png`);
 }
 
+// 改用 let 宣告以便從本機存檔中恢復進度
 let currentIndex = 0;
-const results = [];
+let results = [];
 
 // 2. 抓取 HTML 元素
 const nailImageElement = document.getElementById('nailImage');
@@ -204,14 +217,29 @@ const buttonGrid = document.getElementById('buttonGrid');
 const otherInputBox = document.getElementById('otherInputBox');
 const otherTextInput = document.getElementById('otherText');
 
-// 3. 更新畫面顯示
+// 3. 系統初始化 (檢查是否有未完成的進度)
+function initSystem() {
+    const savedIndex = localStorage.getItem('nail_label_index');
+    const savedResults = localStorage.getItem('nail_label_results');
+    
+    if (savedIndex && savedResults && parseInt(savedIndex) > 0) {
+        if (confirm(`發現上次未完成的標記進度（已完成 ${savedIndex} 張）！\n是否接續標記？\n(按「確定」繼續，按「取消」清除紀錄重新開始)`)) {
+            currentIndex = parseInt(savedIndex);
+            results = JSON.parse(savedResults);
+        } else {
+            clearLocalProgress();
+        }
+    }
+    updateDisplay();
+}
+
+// 4. 更新畫面顯示
 function updateDisplay() {
     if (currentIndex < imageList.length) {
         nailImageElement.style.display = 'block';
         nailImageElement.src = imageList[currentIndex];
         progressElement.innerText = `進度：${currentIndex + 1} / ${imageList.length}`;
         
-        // 恢復顯示主按鈕，隱藏輸入框
         buttonGrid.style.display = 'grid';
         otherInputBox.style.display = 'none';
         otherTextInput.value = '';
@@ -226,19 +254,36 @@ function updateDisplay() {
     }
 }
 
-// 4. 處理一般按鈕點擊
+// 5. 將目前進度存入瀏覽器快取 (防呆防閃退)
+function saveProgressLocally() {
+    localStorage.setItem('nail_label_index', currentIndex);
+    localStorage.setItem('nail_label_results', JSON.stringify(results));
+}
+
+function clearLocalProgress() {
+    localStorage.removeItem('nail_label_index');
+    localStorage.removeItem('nail_label_results');
+}
+
+// 6. 處理一般按鈕點擊
 function handleLabel(labelValue) {
     saveAndNext(labelValue);
 }
 
-// 5. 處理「其他」按鈕點擊
+// 7. 處理「其他」按鈕點擊 (顯示) 與取消 (隱藏)
 function showOtherInput() {
-    buttonGrid.style.display = 'none'; // 隱藏主按鈕，避免誤觸
+    buttonGrid.style.display = 'none';
     otherInputBox.style.display = 'block';
     otherTextInput.focus();
 }
 
-// 6. 處理「其他」輸入框的確認送出
+function cancelOther() {
+    otherInputBox.style.display = 'none';
+    otherTextInput.value = '';
+    buttonGrid.style.display = 'grid'; // 恢復顯示主按鈕
+}
+
+// 8. 處理「其他」輸入框的確認送出
 function submitOther() {
     const val = otherTextInput.value.trim();
     if (val !== "") {
@@ -248,7 +293,7 @@ function submitOther() {
     }
 }
 
-// 7. 記錄結果並切換下一張
+// 9. 記錄結果並切換下一張
 function saveAndNext(labelValue, note = "") {
     results.push({
         image: imageList[currentIndex],
@@ -256,19 +301,21 @@ function saveAndNext(labelValue, note = "") {
         note: note
     });
     currentIndex++;
+    saveProgressLocally(); // 每次點擊都自動備份進度
     updateDisplay();
 }
 
-// 8. 上一步功能 (退回上一張)
+// 10. 上一步功能 (退回上一張並更新備份)
 function undoLast() {
     if (currentIndex > 0) {
         currentIndex--;
         results.pop();
+        saveProgressLocally(); 
         updateDisplay();
     }
 }
 
-// 9. 將結果寫入 Firebase
+// 11. 將結果寫入 Firebase
 async function saveToFirebase() {
     try {
         await addDoc(collection(db, "results"), {
@@ -276,6 +323,7 @@ async function saveToFirebase() {
             total_count: results.length,
             details: results
         });
+        clearLocalProgress(); // 上傳成功後清空本地暫存
         progressElement.innerHTML = "<span style='color: var(--success);'>🎉 感謝協助！所有標記結果已成功儲存至雲端資料庫！</span>";
     } catch (error) {
         console.error("Firebase 儲存失敗:", error);
@@ -283,8 +331,8 @@ async function saveToFirebase() {
     }
 }
 
-// 初始化顯示第一張圖片
-updateDisplay();
+// 啟動系統
+initSystem();
 </script>
 
 </body>
